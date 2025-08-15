@@ -1,0 +1,20 @@
+const express = require("express");
+const router = express.Router();
+const ctrl = require("../controllers/bid.controller");
+const verifyToken = require("../middlewares/authMiddleware");
+const { authLimiter } = require("../middlewares/rateLimit");
+
+// Protected routes - all bid routes require authentication
+router.use(verifyToken);
+
+// Bid management routes
+router.post("/", authLimiter, ctrl.submitBid);
+router.get("/my-bids", ctrl.getMyBids);
+router.get("/my-bid-package", ctrl.getMyBidPackage);
+router.get("/package/:bidPackageId", ctrl.getBidsForPackage);
+router.get("/package/:bidPackageId/statistics", ctrl.getBidPackageStatistics);
+router.get("/:bidId", ctrl.getBidById);
+router.patch("/:bidId", authLimiter, ctrl.updateBid);
+router.patch("/:bidId/withdraw", authLimiter, ctrl.withdrawBid);
+
+module.exports = router;
