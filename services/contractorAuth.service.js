@@ -77,7 +77,7 @@ const createRefreshToken = async (id, ttlDays = 14) => {
     expiresOn: new Date(Date.now() + ttlDays * 86400000).toISOString(),
   };
 };
-const createAccessToken = ({ contractorAuthId, email }, ttl = "10m") =>
+const createAccessToken = ({ contractorAuthId, email }, ttl = "1d") =>
   jwt.sign({ sub: contractorAuthId, email }, process.env.JWT_SECRET, {
     algorithm: "HS256",
     issuer: "lof-auth",

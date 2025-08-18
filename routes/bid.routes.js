@@ -16,5 +16,7 @@ router.get("/package/:bidPackageId/statistics", ctrl.getBidPackageStatistics);
 router.get("/:bidId", ctrl.getBidById);
 router.patch("/:bidId", authLimiter, ctrl.updateBid);
 router.patch("/:bidId/withdraw", authLimiter, ctrl.withdrawBid);
+router.get("/bid-packages/:bidPackageId/leaderboard", ctrl.getLeaderboard);
+router.get("/bid-packages/:bidPackageId/history", ctrl.getBidHistory);
 
 module.exports = router;

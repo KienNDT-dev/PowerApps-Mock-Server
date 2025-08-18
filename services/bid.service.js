@@ -10,21 +10,25 @@ const {
 const {
   getContractorBidPackageId,
   checkContractorInvitation,
+  getContractorIdFromAuth,
 } = require("./invitations.service");
 
-const TABLE = "cr97b_bids";
+const TABLE = "cr97b_commoditybids";
 const PACKAGE_TABLE = "cr97b_bidpackages";
 
 const COL = {
   id: "cr97b_commoditybidid",
   name: "cr97b_name",
   bidPrice: "cr97b_unitprice",
-  contractorAuthBind: "cr97b_Contractor@odata.bind",
-  contractorAuthLookup: "_cr97b_contractor_value",
-  bidPackageBind: "cr97b_BidPackage@odata.bind",
+  contractorLookup: "_cr97b_contractor_value",
   bidPackageLookup: "_cr97b_bidpackage_value",
   submittedOn: "cr97b_submittedon",
   updatedOn: "cr97b_updatedon",
+};
+
+const BIND_COL = {
+  contractorBind: "cr97b_Contractor@odata.bind",
+  bidPackageBind: "cr97b_BidPackage@odata.bind",
 };
 
 const PACKAGE_COL = {
@@ -80,7 +84,10 @@ const checkExistingBid = async (contractorAuthId, bidPackageId) => {
 };
 
 const findContractorBidForPackage = async (contractorAuthId, bidPackageId) => {
-  const filter = `${COL.contractorAuthLookup} eq '${contractorAuthId}' and ${COL.bidPackageLookup} eq '${bidPackageId}'`;
+  const contractorId = await getContractorIdFromAuth(contractorAuthId);
+  if (!contractorId) return null;
+
+  const filter = `${COL.contractorLookup} eq '${contractorId}' and ${COL.bidPackageLookup} eq '${bidPackageId}'`;
   const url = `${TABLE}?$filter=${filter}&$select=${Object.values(COL).join(
     ","
   )}&$top=1`;
@@ -96,7 +103,6 @@ const getBidPackageById = async (bidPackageId) => {
   return result.data || null;
 };
 
-// Add function to validate contractor can bid on package
 const validateContractorCanBid = async (contractorAuthId, bidPackageId) => {
   const invitation = await checkContractorInvitation(
     contractorAuthId,
@@ -108,17 +114,14 @@ const validateContractorCanBid = async (contractorAuthId, bidPackageId) => {
   return true;
 };
 
-// Updated createBid to check invitation
 const createBid = async ({
   bidPackageId,
   contractorAuthId,
   bidPrice,
   bidName = "",
 }) => {
-  // Check if contractor is invited to this bid package
   await validateContractorCanBid(contractorAuthId, bidPackageId);
 
-  // Check if bid already exists
   const existingBid = await checkExistingBid(contractorAuthId, bidPackageId);
   if (existingBid) {
     throw new Error(
@@ -126,13 +129,11 @@ const createBid = async ({
     );
   }
 
-  // Verify bid package exists and is active
   const bidPackage = await getBidPackageById(bidPackageId);
   if (!bidPackage) {
     throw new Error("Bid package not found");
   }
 
-  // Check deadline if exists
   if (
     bidPackage[PACKAGE_COL.deadline] &&
     new Date(bidPackage[PACKAGE_COL.deadline]) < new Date()
@@ -140,16 +141,20 @@ const createBid = async ({
     throw new Error("Bid package deadline has passed");
   }
 
-  // Generate bid name if not provided
   const finalBidName =
     bidName || `Bid by Contractor for ${bidPackage[PACKAGE_COL.name]}`;
+
+  const contractorId = await getContractorIdFromAuth(contractorAuthId);
+  if (!contractorId) {
+    throw new Error("Contractor not found for this user");
+  }
 
   const bidData = {
     [COL.name]: finalBidName,
     [COL.bidPrice]: parseFloat(bidPrice),
     [COL.submittedOn]: new Date().toISOString(),
     [COL.updatedOn]: new Date().toISOString(),
-    [COL.contractorAuthBind]: `/cr97b_contractors(${contractorAuthId})`,
+    [COL.contractorBind]: `/cr97b_contractors(${contractorId})`,
     [COL.bidPackageBind]: `/cr97b_bidpackages(${bidPackageId})`,
   };
 
@@ -176,11 +181,11 @@ const updateBid = async (bidId, updateFields, contractorAuthId = null) => {
     throw new Error("Bid not found");
   }
 
-  if (
-    contractorAuthId &&
-    existingBid[COL.contractorAuthLookup] !== contractorAuthId
-  ) {
-    throw new Error("You can only update your own bids");
+  if (contractorAuthId) {
+    const contractorId = await getContractorIdFromAuth(contractorAuthId);
+    if (existingBid[COL.contractorLookup] !== contractorId) {
+      throw new Error("You can only update your own bids");
+    }
   }
 
   const updateData = {
@@ -197,6 +202,40 @@ const updateBid = async (bidId, updateFields, contractorAuthId = null) => {
   await safePatch(`${TABLE}(${bidId})`, updateData);
 
   return await findBidById(bidId);
+};
+
+const submitOrUpdateBid = async ({
+  bidPackageId,
+  contractorAuthId,
+  bidPrice,
+  bidName = "",
+}) => {
+  await validateContractorCanBid(contractorAuthId, bidPackageId);
+
+  const contractorId = await getContractorIdFromAuth(contractorAuthId);
+  if (!contractorId) {
+    throw new Error("Contractor not found for this user");
+  }
+
+  const existingBid = await findContractorBidForPackage(
+    contractorAuthId,
+    bidPackageId
+  );
+
+  if (existingBid) {
+    return await updateBid(
+      existingBid[COL.id],
+      { bidPrice, bidName },
+      contractorAuthId
+    );
+  } else {
+    return await createBid({
+      bidPackageId,
+      contractorAuthId,
+      bidPrice,
+      bidName,
+    });
+  }
 };
 
 const withdrawBid = async (bidId, contractorAuthId) => {
@@ -252,7 +291,6 @@ const getBidStatistics = async (bidPackageId) => {
   return stats;
 };
 
-// Updated getUserPackage to use invitation service
 const getUserPackage = async (contractorAuthId) => {
   const bidPackageId = await getContractorBidPackageId(contractorAuthId);
 
@@ -279,6 +317,79 @@ const getUserPackage = async (contractorAuthId) => {
   };
 };
 
+const getLeaderboardForPackage = async (bidPackageId, myContractorAuthId) => {
+  const filter = `${COL.bidPackageLookup} eq '${bidPackageId}' and not startswith(${COL.name}, '[WITHDRAWN]')`;
+  const url = `${TABLE}?$filter=${filter}&$select=${Object.values(COL).join(
+    ","
+  )}&$orderby=${COL.submittedOn} desc&$top=500`;
+  const result = await safeGet(url);
+  const allBids = result.data.value || [];
+
+  const latestBidMap = new Map();
+  for (const bid of allBids) {
+    const contractorId = bid[COL.contractorAuthLookup];
+    if (!latestBidMap.has(contractorId)) {
+      latestBidMap.set(contractorId, bid);
+    }
+  }
+
+  let leaderboard = Array.from(latestBidMap.values()).map((bid) => ({
+    bidId: bid[COL.id],
+    contractorId: bid[COL.contractorAuthLookup],
+    contractorAlias:
+      bid[COL.contractorAuthLookup] === myContractorAuthId
+        ? "Me"
+        : "Contractor",
+    amount: bid[COL.bidPrice],
+    currency: "VND",
+    isMine: bid[COL.contractorAuthLookup] === myContractorAuthId,
+    submittedOn: bid[COL.submittedOn],
+  }));
+
+  leaderboard.sort((a, b) => {
+    if (a.amount !== b.amount) return a.amount - b.amount;
+    return new Date(a.submittedOn) - new Date(b.submittedOn);
+  });
+
+  leaderboard = leaderboard.map((bid, idx) => ({
+    ...bid,
+    rank: idx + 1,
+    contractorAlias: bid.isMine ? "Me" : `Contractor ${idx + 1}`,
+  }));
+
+  return leaderboard;
+};
+
+const getBidHistoryForPackage = async (bidPackageId) => {
+  const filter = `${COL.bidPackageLookup} eq '${bidPackageId}'`;
+  const url = `${TABLE}?$filter=${filter}&$select=${Object.values(COL).join(
+    ","
+  )}&$orderby=${COL.submittedOn} asc&$top=500`;
+  const result = await safeGet(url);
+  const allBids = result.data.value || [];
+
+  const events = allBids.map((bid) => {
+    let type = "submitted";
+    if (bid[COL.name]?.startsWith("[WITHDRAWN]")) {
+      type = "withdrawn";
+    } else if (
+      bid[COL.updatedOn] &&
+      bid[COL.updatedOn] !== bid[COL.submittedOn]
+    ) {
+      type = "updated";
+    }
+    return {
+      ts: bid[COL.updatedOn] || bid[COL.submittedOn],
+      type,
+      bidId: bid[COL.id],
+      contractorId: bid[COL.contractorAuthLookup],
+      amount: bid[COL.bidPrice],
+    };
+  });
+
+  return events;
+};
+
 module.exports = {
   generateBidReference,
   findBidById,
@@ -293,6 +404,9 @@ module.exports = {
   getBidStatistics,
   getUserPackage,
   validateContractorCanBid,
+  getLeaderboardForPackage,
+  getBidHistoryForPackage,
+  submitOrUpdateBid,
   COL,
   PACKAGE_COL,
 };

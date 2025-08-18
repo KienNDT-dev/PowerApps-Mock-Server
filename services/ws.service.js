@@ -1,4 +1,10 @@
 const jwt = require("jsonwebtoken");
+const {
+  getBidPackageById,
+  createBid,
+  updateBid,
+  submitOrUpdateBid,
+} = require("./bid.service");
 
 class WebSocketService {
   constructor() {
@@ -8,13 +14,9 @@ class WebSocketService {
   init(io) {
     this.io = io;
 
-    // JWT Authentication middleware
     io.use((socket, next) => {
       const token = socket.handshake.headers.access_token;
-      if (!token) {
-        return next(new Error("No token provided"));
-      }
-
+      if (!token) return next(new Error("No token provided"));
       try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         socket.userId = decoded.sub;
@@ -26,74 +28,106 @@ class WebSocketService {
     });
 
     io.on("connection", (socket) => {
-      console.log(`🔌 Client connected: ${socket.id} (${socket.userEmail})`);
-
-      // ✅ Health check event for Postman or client testing
-      socket.on("health-check", (payload, callback) => {
-        console.log(`📥 Health check from ${socket.id}:`, payload);
-        // socket.emit("health-response", {
-        //   ok: true,
-        //   serverTime: new Date().toISOString(),
-        //   user: socket.userEmail || null,
-        // });
-        callback({
+      socket.on("health-check", (_, callback) => {
+        callback?.({
           ok: true,
           serverTime: new Date().toISOString(),
           user: socket.userEmail || null,
-          receivedPayload: payload,
         });
       });
 
-      socket.on("join:bidPackage", ({ bidPackageId }) => {
-        const roomName = `bidPackage:${bidPackageId}`;
-        socket.join(roomName);
-        console.log(`📦 ${socket.id} joined room ${roomName}`);
-        socket.emit("room:joined", { bidPackageId, roomName });
+      socket.on("join:bidPackage", async ({ bidPackageId }, callback) => {
+        try {
+          const bidPackage = await getBidPackageById(bidPackageId);
+          if (!bidPackage || bidPackage.error || bidPackage.code) {
+            return callback?.({
+              success: false,
+              message: "Bid package not found",
+            });
+          }
+          const roomName = `bidPackage:${bidPackageId}`;
+          await socket.join(roomName);
+          console.log("Socket rooms:", socket.rooms);
+          callback?.({ success: true, roomName });
+        } catch {
+          callback?.({
+            success: false,
+            message: "Error validating bid package",
+          });
+        }
       });
 
-      socket.on("leave:bidPackage", ({ bidPackageId }) => {
+      socket.on("leave:bidPackage", ({ bidPackageId }, callback) => {
         const roomName = `bidPackage:${bidPackageId}`;
         socket.leave(roomName);
-        console.log(`📦 ${socket.id} left room ${roomName}`);
-        socket.emit("room:left", { bidPackageId, roomName });
+        callback?.({ success: true, roomName });
       });
 
-      socket.on("disconnect", (reason) => {
-        console.log(`❌ Client disconnected: ${socket.id} (${reason})`);
-      });
-    });
+      socket.on(
+        "bid:create",
+        async ({ bidPackageId, bidPrice, bidName }, callback) => {
+          try {
+            const roomName = `bidPackage:${bidPackageId}`;
+            console.log(socket.rooms);
+            if (!socket.rooms.has(roomName)) {
+              return callback?.({
+                success: false,
+                message:
+                  "You must join this bid package room before creating a bid",
+              });
+            }
+            const bidRecord = await submitOrUpdateBid({
+              bidPackageId,
+              contractorAuthId: socket.userId,
+              bidPrice,
+              bidName,
+            });
 
-    console.log("✅ WebSocket service initialized");
+            this.io.to(roomName).emit("bid:new", bidRecord);
+            callback?.({ success: true, bid: bidRecord });
+          } catch (err) {
+            callback?.({
+              success: false,
+              message: err.message || "Server error",
+            });
+          }
+        }
+      );
+
+      socket.on(
+        "bid:update",
+        async ({ bidId, bidPackageId, updateFields }, callback) => {
+          try {
+            const roomName = `bidPackage:${bidPackageId}`;
+            if (!socket.rooms.has(roomName)) {
+              return callback?.({
+                success: false,
+                message:
+                  "You must join this bid package room before updating a bid",
+              });
+            }
+
+            const updatedBid = await updateBid(
+              bidId,
+              updateFields,
+              socket.contractorAuthId
+            );
+
+            this.io.to(roomName).emit("bid:updated", updatedBid);
+            callback?.({ success: true, bid: updatedBid });
+          } catch (err) {
+            callback?.({
+              success: false,
+              message: err.message || "Server error",
+            });
+          }
+        }
+      );
+
+      socket.on("disconnect", () => {});
+    });
   }
 
-  // Broadcast bid update
-  publishBidUpdate({ bidPackageId, bidId, fieldsChanged, updatedBy }) {
-    if (!this.io) return;
-    const roomName = `bidPackage:${bidPackageId}`;
-    this.io.to(roomName).emit("bid:updated", {
-      bidPackageId,
-      bidId,
-      fieldsChanged,
-      updatedBy,
-      timestamp: new Date().toISOString(),
-    });
-    console.log(`📡 Bid update sent to ${roomName} (Bid: ${bidId})`);
-  }
-
-  // Broadcast new bid
-  publishNewBid({ bidPackageId, bidId, submittedBy }) {
-    if (!this.io) return;
-    const roomName = `bidPackage:${bidPackageId}`;
-    this.io.to(roomName).emit("bid:new", {
-      bidPackageId,
-      bidId,
-      submittedBy,
-      timestamp: new Date().toISOString(),
-    });
-    console.log(`📡 New bid sent to ${roomName} (Bid: ${bidId})`);
-  }
-
-  // Get number of connected clients in a room
   async getRoomClientCount(bidPackageId) {
     if (!this.io) return 0;
     const roomName = `bidPackage:${bidPackageId}`;

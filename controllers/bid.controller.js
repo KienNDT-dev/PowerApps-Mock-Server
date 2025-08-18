@@ -11,6 +11,10 @@ const {
   findContractorBidForPackage,
   getUserPackage,
   validateContractorCanBid,
+  getLeaderboardForPackage,
+  getBidHistoryForPackage,
+  getBidPackageById,
+  submitOrUpdateBid,
 } = require("../services/bid.service");
 
 // Import invitation service for additional checks
@@ -47,7 +51,6 @@ async function submitBid(req, res, next) {
       });
     }
 
-    // Additional validation: Check if contractor is invited to this specific package
     const invitation = await checkContractorInvitation(
       contractorAuthId,
       bidPackageId
@@ -60,7 +63,7 @@ async function submitBid(req, res, next) {
       });
     }
 
-    const savedBid = await createBid({
+    const savedBid = await submitOrUpdateBid({
       bidPackageId,
       contractorAuthId,
       bidPrice,
@@ -413,6 +416,74 @@ async function getMyBidPackage(req, res, next) {
   }
 }
 
+async function getLeaderboard(req, res, next) {
+  try {
+    const { bidPackageId } = req.params;
+    const contractorAuthId = req.user.sub;
+
+    if (!bidPackageId) {
+      throw new AppError({
+        code: CODES.BAD_REQUEST,
+        message: "bidPackageId is required",
+        httpStatus: 400,
+      });
+    }
+
+    const leaderboard = await getLeaderboardForPackage(
+      bidPackageId,
+      contractorAuthId
+    );
+
+    let viewers = 0;
+    if (wsService && wsService.getRoomClientCount) {
+      try {
+        viewers = await wsService.getRoomClientCount(bidPackageId);
+      } catch (err) {
+        console.warn("Could not get active viewers count:", err.message);
+      }
+    }
+
+    let deadline = null;
+    if (typeof getBidPackageById === "function") {
+      const pkg = await getBidPackageById(bidPackageId);
+      deadline = pkg?.cr97b_submissiondeadline || null;
+    }
+
+    res.json({
+      bidPackageId,
+      deadline,
+      viewers,
+      bids: leaderboard,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getBidHistory(req, res, next) {
+  try {
+    const { bidPackageId } = req.params;
+
+    if (!bidPackageId) {
+      throw new AppError({
+        code: CODES.BAD_REQUEST,
+        message: "bidPackageId is required",
+        httpStatus: 400,
+      });
+    }
+
+    // Optionally: check invitation here if needed
+
+    const events = await getBidHistoryForPackage(bidPackageId);
+
+    res.json({
+      events,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   submitBid,
   updateBid: updateBidController,
@@ -423,4 +494,6 @@ module.exports = {
   getBidPackageStatistics,
   getMyBidForPackage,
   getMyBidPackage,
+  getLeaderboard,
+  getBidHistory,
 };
