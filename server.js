@@ -2,12 +2,14 @@ const http = require("http");
 const { Server } = require("socket.io");
 const app = require("./app");
 const { port } = require("./config");
+const { instrument } = require("@socket.io/admin-ui");
 
 const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:5173",
+    origin: ["http://localhost:5173", "https://admin.socket.io"],
+    credentials: true,
     methods: ["GET", "POST"],
   },
 });
@@ -20,6 +22,11 @@ try {
     "⚠️ WebSocket service not found, continuing without Socket.IO features"
   );
 }
+
+instrument(io, {
+  auth: false,
+  mode: "development",
+});
 
 server.listen(port, () => {
   console.log(`🚀 API listening on http://localhost:${port}`);

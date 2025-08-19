@@ -36,6 +36,7 @@ const PACKAGE_COL = {
   code: "cr97b_name",
   name: "cr97b_bidpackagecode",
   description: "cr97b_description",
+  estimatePrice: "cr97b_priceestimate",
   deadline: "cr97b_submissiondeadline",
   createdAt: "cr97b_createdon",
 };
@@ -321,45 +322,35 @@ const getLeaderboardForPackage = async (bidPackageId, myContractorAuthId) => {
   const filter = `${COL.bidPackageLookup} eq '${bidPackageId}' and not startswith(${COL.name}, '[WITHDRAWN]')`;
   const url = `${TABLE}?$filter=${filter}&$select=${Object.values(COL).join(
     ","
-  )}&$orderby=${COL.submittedOn} desc&$top=500`;
+  )}&$expand=cr97b_Contractor($select=cr97b_contractorname)&$orderby=${
+    COL.updatedOn
+  } desc&$top=500`;
   const result = await safeGet(url);
   const allBids = result.data.value || [];
 
+  const myContractorId = await getContractorIdFromAuth(myContractorAuthId);
+
   const latestBidMap = new Map();
   for (const bid of allBids) {
-    const contractorId = bid[COL.contractorAuthLookup];
+    const contractorId = bid[COL.contractorLookup];
     if (!latestBidMap.has(contractorId)) {
       latestBidMap.set(contractorId, bid);
     }
   }
 
-  let leaderboard = Array.from(latestBidMap.values()).map((bid) => ({
+  const leaderboard = Array.from(latestBidMap.values()).map((bid) => ({
     bidId: bid[COL.id],
-    contractorId: bid[COL.contractorAuthLookup],
-    contractorAlias:
-      bid[COL.contractorAuthLookup] === myContractorAuthId
-        ? "Me"
-        : "Contractor",
+    contractorId: bid[COL.contractorLookup],
+    contractorAlias: bid.cr97b_Contractor?.cr97b_contractorname || "Contractor",
     amount: bid[COL.bidPrice],
     currency: "VND",
-    isMine: bid[COL.contractorAuthLookup] === myContractorAuthId,
+    isMine: bid[COL.contractorLookup] === myContractorId,
     submittedOn: bid[COL.submittedOn],
-  }));
-
-  leaderboard.sort((a, b) => {
-    if (a.amount !== b.amount) return a.amount - b.amount;
-    return new Date(a.submittedOn) - new Date(b.submittedOn);
-  });
-
-  leaderboard = leaderboard.map((bid, idx) => ({
-    ...bid,
-    rank: idx + 1,
-    contractorAlias: bid.isMine ? "Me" : `Contractor ${idx + 1}`,
+    updatedOn: bid[COL.updatedOn],
   }));
 
   return leaderboard;
 };
-
 const getBidHistoryForPackage = async (bidPackageId) => {
   const filter = `${COL.bidPackageLookup} eq '${bidPackageId}'`;
   const url = `${TABLE}?$filter=${filter}&$select=${Object.values(COL).join(

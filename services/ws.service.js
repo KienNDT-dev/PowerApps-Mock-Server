@@ -1,7 +1,6 @@
 const jwt = require("jsonwebtoken");
 const {
   getBidPackageById,
-  createBid,
   updateBid,
   submitOrUpdateBid,
 } = require("./bid.service");
@@ -9,18 +8,20 @@ const {
 class WebSocketService {
   constructor() {
     this.io = null;
+    this.userRooms = new Map();
   }
 
   init(io) {
     this.io = io;
 
     io.use((socket, next) => {
-      const token = socket.handshake.headers.access_token;
+      const token = socket.handshake.auth?.token;
       if (!token) return next(new Error("No token provided"));
       try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         socket.userId = decoded.sub;
         socket.userEmail = decoded.email;
+        socket.contractorAuthId = decoded.sub; // Ensure this is always set
         next();
       } catch {
         next(new Error("Invalid token"));
@@ -47,7 +48,10 @@ class WebSocketService {
           }
           const roomName = `bidPackage:${bidPackageId}`;
           await socket.join(roomName);
-          console.log("Socket rooms:", socket.rooms);
+          const rooms = this.userRooms.get(socket.userId) || [];
+          if (!rooms.includes(bidPackageId)) rooms.push(bidPackageId);
+          this.userRooms.set(socket.userId, rooms);
+          this.broadcastViewerCount(bidPackageId);
           callback?.({ success: true, roomName });
         } catch {
           callback?.({
@@ -60,6 +64,12 @@ class WebSocketService {
       socket.on("leave:bidPackage", ({ bidPackageId }, callback) => {
         const roomName = `bidPackage:${bidPackageId}`;
         socket.leave(roomName);
+        const rooms = this.userRooms.get(socket.userId) || [];
+        this.userRooms.set(
+          socket.userId,
+          rooms.filter((id) => id !== bidPackageId)
+        );
+        this.broadcastViewerCount(bidPackageId);
         callback?.({ success: true, roomName });
       });
 
@@ -68,7 +78,6 @@ class WebSocketService {
         async ({ bidPackageId, bidPrice, bidName }, callback) => {
           try {
             const roomName = `bidPackage:${bidPackageId}`;
-            console.log(socket.rooms);
             if (!socket.rooms.has(roomName)) {
               return callback?.({
                 success: false,
@@ -82,7 +91,6 @@ class WebSocketService {
               bidPrice,
               bidName,
             });
-
             this.io.to(roomName).emit("bid:new", bidRecord);
             callback?.({ success: true, bid: bidRecord });
           } catch (err) {
@@ -124,7 +132,15 @@ class WebSocketService {
         }
       );
 
-      socket.on("disconnect", () => {});
+      socket.on("disconnect", () => {
+        if (this.userRooms.has(socket.userId)) {
+          const rooms = this.userRooms.get(socket.userId);
+          rooms.forEach((bidPackageId) => {
+            this.broadcastViewerCount(bidPackageId);
+          });
+          this.userRooms.delete(socket.userId);
+        }
+      });
     });
   }
 
@@ -133,6 +149,16 @@ class WebSocketService {
     const roomName = `bidPackage:${bidPackageId}`;
     const sockets = await this.io.in(roomName).fetchSockets();
     return sockets.length;
+  }
+
+  async broadcastViewerCount(bidPackageId) {
+    const count = await this.getRoomClientCount(bidPackageId);
+    console.log(count);
+    const roomName = `bidPackage:${bidPackageId}`;
+    this.io.to(roomName).emit("viewer:count", {
+      bidPackageId,
+      viewers: count,
+    });
   }
 }
 

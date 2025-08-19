@@ -31,6 +31,9 @@ app.use(cookieParser(cookieSecret));
 app.use(requestId);
 app.use(globalLimiter);
 app.use(requestLogger);
+app.get("/", (req, res) => {
+  res.json({ success: true, message: "API is running" });
+});
 app.get("/health", (_req, res) => res.json({ ok: true }));
 app.use("/api", routes);
 app.use(notFound);

@@ -429,24 +429,25 @@ async function getLeaderboard(req, res, next) {
       });
     }
 
-    const leaderboard = await getLeaderboardForPackage(
+    let leaderboard = await getLeaderboardForPackage(
       bidPackageId,
       contractorAuthId
     );
 
+    let deadline = null;
     let viewers = 0;
+
+    if (typeof getBidPackageById === "function") {
+      const pkg = await getBidPackageById(bidPackageId);
+      deadline = pkg?.cr97b_submissiondeadline || null;
+    }
+
     if (wsService && wsService.getRoomClientCount) {
       try {
         viewers = await wsService.getRoomClientCount(bidPackageId);
       } catch (err) {
         console.warn("Could not get active viewers count:", err.message);
       }
-    }
-
-    let deadline = null;
-    if (typeof getBidPackageById === "function") {
-      const pkg = await getBidPackageById(bidPackageId);
-      deadline = pkg?.cr97b_submissiondeadline || null;
     }
 
     res.json({
