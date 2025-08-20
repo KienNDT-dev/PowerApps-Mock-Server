@@ -1,6 +1,9 @@
 const isProd = process.env.NODE_ENV === "production";
 
-const allowedOrigins = (process.env.CORS_ORIGINS || "http://localhost:5173")
+const allowedOrigins = (
+  process.env.CORS_ORIGINS ||
+  "http://localhost:5173,https://power-apps-mock-client.vercel.app"
+)
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);

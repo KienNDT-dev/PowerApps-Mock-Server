@@ -13,6 +13,7 @@ const {
   deleteRefreshTokenByHash,
 } = require("../services/contractorAuth.service");
 const { safeGet, safeDelete } = require("../utils/apiDataverseUtils");
+const wsService = require("../services/ws.service");
 
 const TABLE = "cr97b_contractorauths";
 const TOKEN_TABLE = "cr97b_authtokens";
@@ -30,7 +31,6 @@ const TOKEN_COL = {
 
 const REFRESH_COOKIE_NAME = process.env.REFRESH_COOKIE_NAME || "rt";
 
-// Helper function to clear refresh token cookie
 function clearRefreshTokenCookie(res) {
   res.clearCookie(REFRESH_COOKIE_NAME, {
     httpOnly: true,
@@ -40,7 +40,6 @@ function clearRefreshTokenCookie(res) {
   });
 }
 
-// Middleware
 function verifyAccessToken(req, res, next) {
   const token = req.headers.authorization?.split(" ")[1];
   if (!token)
@@ -66,7 +65,6 @@ function verifyAccessToken(req, res, next) {
   });
 }
 
-// Routes
 async function generatePasswordForAuth(req, res, next) {
   try {
     const { contractorAuthId } = req.params;
@@ -205,7 +203,6 @@ async function logout(req, res, next) {
   try {
     const refreshTokenRaw = req.cookies?.[REFRESH_COOKIE_NAME];
 
-    // Always clear the cookie, even if no token present
     clearRefreshTokenCookie(res);
 
     if (refreshTokenRaw) {
@@ -213,9 +210,11 @@ async function logout(req, res, next) {
       await deleteRefreshTokenByHash(hashedToken);
     }
 
-    // If user is authenticated, also invalidate all their tokens
     if (req.user?.sub) {
       await logoutContractor(req.user.sub);
+      if (wsService && wsService.disconnectUser) {
+        await wsService.disconnectUser(req.user.sub);
+      }
     }
 
     res.json({
