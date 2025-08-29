@@ -185,7 +185,6 @@ async function getBidsForPackage(req, res, next) {
   try {
     const { bidPackageId } = req.params;
     const { page = 1, limit = 20, status } = req.query;
-    const contractorAuthId = req.user.sub;
 
     if (!bidPackageId) {
       throw new AppError({
@@ -195,26 +194,18 @@ async function getBidsForPackage(req, res, next) {
       });
     }
 
-    // Check if contractor is invited to view this package
-    const invitation = await checkContractorInvitation(
-      contractorAuthId,
-      bidPackageId
-    );
-    if (!invitation) {
-      throw new AppError({
-        code: CODES.FORBIDDEN,
-        message: "You are not authorized to view bids for this package",
-        httpStatus: 403,
-      });
-    }
-
+    // Fetch bids
     const bids = await findBidsByPackageId(bidPackageId, {
       page: parseInt(page),
       limit: parseInt(limit),
       status,
     });
 
+    // Fetch statistics
     const statistics = await getBidStatistics(bidPackageId);
+
+    // Fetch bid package details
+    const bidPackage = await getBidPackageById(bidPackageId);
 
     let activeViewers = 0;
     if (wsService && wsService.getRoomClientCount) {
@@ -227,6 +218,7 @@ async function getBidsForPackage(req, res, next) {
 
     res.json({
       success: true,
+      bidPackage, // <-- Add this line
       bids,
       statistics,
       pagination: {
@@ -485,6 +477,26 @@ async function getBidHistory(req, res, next) {
   }
 }
 
+async function getBidPackageDetails(req, res, next) {
+  try {
+    const { bidPackageId } = req.params;
+    if (!bidPackageId) {
+      return res
+        .status(400)
+        .json({ success: false, message: "bidPackageId is required" });
+    }
+    const bidPackage = await getBidPackageById(bidPackageId);
+    if (!bidPackage) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Bid package not found" });
+    }
+    res.json({ success: true, bidPackage });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   submitBid,
   updateBid: updateBidController,
@@ -497,4 +509,5 @@ module.exports = {
   getMyBidPackage,
   getLeaderboard,
   getBidHistory,
+  getBidPackageDetails,
 };

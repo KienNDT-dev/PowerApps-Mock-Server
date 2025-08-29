@@ -54,13 +54,11 @@ const findBidById = async (bidId) => {
 };
 
 const findBidsByPackageId = async (bidPackageId, options = {}) => {
-  const { page = 1, limit = 20 } = options;
-  const skip = (page - 1) * limit;
-
+  const { limit = 20 } = options;
   const filter = `${COL.bidPackageLookup} eq '${bidPackageId}'`;
   const url = `${TABLE}?$filter=${filter}&$select=${Object.values(COL).join(
     ","
-  )}&$orderby=${COL.submittedOn} desc&$top=${limit}&$skip=${skip}`;
+  )}&$orderby=${COL.submittedOn} desc&$top=${limit}`;
   const result = await safeGet(url);
   return result.data.value || [];
 };

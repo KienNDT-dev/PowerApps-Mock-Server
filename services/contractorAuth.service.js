@@ -121,6 +121,8 @@ async function loginContractor(email, plainPassword) {
   const { refreshToken, expiresOn } = await createRefreshToken(auth[COL.id]);
   return {
     success: true,
+    contractorAuthId: auth[COL.id],
+    email: email,
     accessToken: createAccessToken({ contractorAuthId: auth[COL.id], email }),
     refreshToken,
     refreshExpiresOn: expiresOn,

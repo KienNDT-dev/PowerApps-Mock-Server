@@ -14,6 +14,9 @@ const {
 } = require("../services/contractorAuth.service");
 const { safeGet, safeDelete } = require("../utils/apiDataverseUtils");
 const wsService = require("../services/ws.service");
+const {
+  getContractorBidPackageId,
+} = require("../services/invitations.service");
 
 const TABLE = "cr97b_contractorauths";
 const TOKEN_TABLE = "cr97b_authtokens";
@@ -122,6 +125,14 @@ async function login(req, res, next) {
       });
     }
 
+    // Get contractor's bid package ID for auto-join
+    let bidPackageId = null;
+    try {
+      bidPackageId = await getContractorBidPackageId(result.contractorAuthId);
+    } catch (error) {
+      console.warn("Could not get bid package for contractor:", error.message);
+    }
+
     // Set refresh token in secure cookie
     res.cookie(REFRESH_COOKIE_NAME, result.refreshToken, {
       httpOnly: true,
@@ -133,6 +144,7 @@ async function login(req, res, next) {
 
     res.json({
       accessToken: result.accessToken,
+      bidPackageId: bidPackageId,
       message: "Login successful",
     });
   } catch (err) {

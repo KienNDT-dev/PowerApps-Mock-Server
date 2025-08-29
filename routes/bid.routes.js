@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const ctrl = require("../controllers/bid.controller");
 const verifyToken = require("../middlewares/authMiddleware");
+const requireAdmin = require("../middlewares/requireAdmin");
 const { authLimiter } = require("../middlewares/rateLimit");
 
 // Protected routes - all bid routes require authentication
@@ -11,7 +12,10 @@ router.use(verifyToken);
 router.post("/", authLimiter, ctrl.submitBid);
 router.get("/my-bids", ctrl.getMyBids);
 router.get("/my-bid-package", ctrl.getMyBidPackage);
-router.get("/package/:bidPackageId", ctrl.getBidsForPackage);
+
+// Make this route admin-only
+router.get("/package/:bidPackageId", requireAdmin, ctrl.getBidsForPackage);
+
 router.get("/package/:bidPackageId/statistics", ctrl.getBidPackageStatistics);
 router.get("/:bidId", ctrl.getBidById);
 router.patch("/:bidId", authLimiter, ctrl.updateBid);
